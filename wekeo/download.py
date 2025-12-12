@@ -34,7 +34,7 @@ def unzip(archive: Path, to: Path|None):
         return
 
 
-def download(query, archive_dir: Path, extract_dir: Path|None = None, rm_archive: bool = False):
+def download(query, archive_dir: Path, extract_dir: Path|None = None, rm_archive: bool = False, recursive_try = 0, max_recursive_try = 3):
     """
     Download files from query results, skipping files that already exist locally.
         
@@ -72,19 +72,32 @@ def download(query, archive_dir: Path, extract_dir: Path|None = None, rm_archive
             
     # Download missing archives
     if missing: # query only if missing files
-        print(f"Downloading {len(missing)} files...")
+        print(f"Downloading {len(missing)} missing files...")
         query.results = missing
         query.download(download_dir=archive_dir)
     else:
         print("All files already present locally, skipping download.")
     
+    error_not_downloaded = []
+    
     # Extract downloaded archives
     if extract:
         for archive in extract:
+            if not archive.exists():
+                error_not_downloaded.append(archive)
+                continue
+            
             unzip(archive, to=extract_dir)
             if rm_archive:
                 archive.unlink()  # remove archive after extraction
-                
+
+    if error_not_downloaded:
+        if recursive_try >= max_recursive_try:
+            RuntimeError(f"Error: Maximum recursive download attempts ({max_recursive_try}) reached. Some files could not be downloaded.")
+        print(f"Warning: {len(error_not_downloaded)} archives were not downloaded and could not be extracted:")
+        print("Recursively try again to download missing files.")
+        results = download(query, archive_dir, extract_dir, rm_archive, recursive_try + 1, max_recursive_try)
+
     return results
 
 def format_query(
@@ -135,6 +148,7 @@ def get_storage_path():
         
     return storage_path
 
+
 def get_FRP_products(
     start_date: datetime,
     end_date: datetime,
@@ -155,6 +169,6 @@ def get_FRP_products(
     json_query = format_query(start_date, end_date, area)
     query = hda_client.search(json_query)
     
-    results = download(query, archive_dir=get_storage_path(), rm_archive=True)
+    results = download(query, archive_dir=get_storage_path(), rm_archive=False)
     return results
     

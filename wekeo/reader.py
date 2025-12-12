@@ -5,6 +5,20 @@ import numpy as np
 from typing import List, Optional, Union
 
 
+"""
+Sentinel-3 SLSTR L2 FRP Product Reader
+
+This module provides readers for Sentinel-3 SLSTR Fire Radiative Power (FRP) products.
+It supports multiple product format versions with automatic detection:
+
+- v2 format (2022 and earlier): Single FRP_in.nc file structure
+- v3 format (2024+): Multiple specialized NetCDF files (merged, standard, alternative)
+
+The main function read_FRP_product() automatically detects the format version and
+dispatches to the appropriate sub-reader.
+"""
+
+
 def read_FRP_product(
     product_path: Union[str, Path],
     variables: Optional[List[str]] = None,
@@ -14,8 +28,8 @@ def read_FRP_product(
     """
     Read Sentinel-3 SLSTR L2 FRP product into an xarray Dataset.
     
-    This reader specifically handles the FRP (Fire Radiative Power) product structure
-    with its multiple NetCDF files and different dimension systems.
+    This reader automatically detects the product version and uses the appropriate
+    sub-reader for different FRP product formats (v2 for 2022 and earlier, v3 for 2024+).
     
     Args:
         product_path: Path to the .SEN3 product directory
@@ -38,7 +52,7 @@ def read_FRP_product(
         xarray.Dataset: Dataset with requested FRP variables
         
     Example:
-        >>> ds = read_slstr_frp(
+        >>> ds = read_FRP_product(
         ...     "S3A_SL_2_FRP____20250714T144720.SEN3",
         ...     variables=['latitude', 'longitude', 'FRP_SWIR', 'FRP_MWIR']
         ... )
@@ -53,6 +67,126 @@ def read_FRP_product(
     if not product_path.exists():
         raise FileNotFoundError(f"Product path does not exist: {product_path}")
     
+    # Detect product version by checking which files exist
+    has_merged_file = (product_path / 'FRP_Merged_MWIR1kmStandard_SWIR1km.nc').exists()
+    has_frp_in_file = (product_path / 'FRP_in.nc').exists()
+    
+    if has_merged_file:
+        # Newer format (2024+) - v3
+        return _read_FRP_product_v3(product_path, variables, decode_times, chunks)
+    elif has_frp_in_file:
+        # Older format (2022 and earlier) - v2
+        return _read_FRP_product_v2(product_path, variables, decode_times, chunks)
+    else:
+        raise ValueError(
+            f"Unknown FRP product format in {product_path}. "
+            "Could not find 'FRP_Merged_MWIR1kmStandard_SWIR1km.nc' (v3) or 'FRP_in.nc' (v2)."
+        )
+
+
+def _read_FRP_product_v2(
+    product_path: Path,
+    variables: Optional[List[str]] = None,
+    decode_times: bool = True,
+    chunks: dict = None,
+) -> xr.Dataset:
+    """
+    Read older format (v2) Sentinel-3 SLSTR L2 FRP product (2022 and earlier).
+    
+    This format uses a single FRP_in.nc file with dimensions:
+    - fires: main dimension for standard MWIR/SWIR detections
+    - fires_MWIR_alternative: alternative MWIR detections
+    - fires_SWIR_500m: high-resolution SWIR detections
+    
+    Args:
+        product_path: Path to the .SEN3 product directory (already validated)
+        variables: List of variables to read
+        decode_times: Whether to decode time coordinates
+        chunks: Chunking specification for dask arrays
+        
+    Returns:
+        xarray.Dataset: Dataset with requested FRP variables
+    """
+    # Define default variables if none specified
+    if variables is None:
+        variables = [
+            'latitude', 
+            'longitude', 
+            'time',
+            'FRP_SWIR', 
+            'FRP_uncertainty_SWIR',
+            'FRP_MWIR', 
+            'FRP_uncertainty_MWIR',
+            'confidence_SWIR_SAA',
+            'solar_zenith',
+        ]
+    
+    # Main FRP file
+    frp_file = product_path / 'FRP_in.nc'
+    
+    if not frp_file.exists():
+        raise FileNotFoundError(f"FRP file does not exist: {frp_file}")
+    
+    try:
+        # Open the main FRP dataset
+        ds = xr.open_dataset(frp_file, decode_times=decode_times, chunks=chunks)
+        
+        # Filter to requested variables if specified
+        if variables:
+            available_vars = [v for v in variables if v in ds.variables]
+            if available_vars:
+                # Keep dimension coordinates
+                coords_to_keep = ['fires']
+                if 'fires_MWIR_alternative' in ds.dims:
+                    coords_to_keep.append('fires_MWIR_alternative')
+                if 'fires_SWIR_500m' in ds.dims:
+                    coords_to_keep.append('fires_SWIR_500m')
+                
+                vars_to_keep = list(set(available_vars + coords_to_keep))
+                ds = ds[vars_to_keep]
+            else:
+                print(f"Warning: None of the requested variables found in {frp_file}")
+        
+        # Add global attributes
+        ds.attrs.update({
+            'product_path': str(product_path),
+            'product_type': 'Sentinel-3 SLSTR L2 FRP',
+            'product_format_version': 'v2',
+            'reader_version': '1.0',
+            'description': 'Fire Radiative Power product from SLSTR instrument (v2 format)'
+        })
+        
+        return ds
+        
+    except Exception as e:
+        raise RuntimeError(f"Error reading FRP product v2 from {frp_file}: {e}")
+
+
+def _read_FRP_product_v3(
+    product_path: Path,
+    variables: Optional[List[str]] = None,
+    decode_times: bool = True,
+    chunks: dict = None,
+) -> xr.Dataset:
+    """
+    Read newer format (v3) Sentinel-3 SLSTR L2 FRP product (2024+).
+    
+    This format uses multiple NetCDF files:
+    - FRP_Merged_MWIR1kmStandard_SWIR1km.nc: merged MWIR/SWIR detections
+    - FRP_MWIR1km_standard.nc: standard MWIR detections
+    - FRP_MWIR1km_alternative.nc: alternative MWIR detections
+    - FRP_SWIR500m.nc: high-resolution SWIR detections
+    - geodetic_in.nc: grid coordinates
+    
+    Args:
+        product_path: Path to the .SEN3 product directory (already validated)
+        variables: List of variables to read
+        decode_times: Whether to decode time coordinates
+        chunks: Chunking specification for dask arrays
+        
+    Returns:
+        xarray.Dataset: Dataset with requested FRP variables
+    """
     # Define default variables if none specified
     if variables is None:
         variables = [
@@ -220,8 +354,9 @@ def read_FRP_product(
     combined_ds.attrs.update({
         'product_path': str(product_path),
         'product_type': 'Sentinel-3 SLSTR L2 FRP',
+        'product_format_version': 'v3',
         'reader_version': '1.0',
-        'description': 'Fire Radiative Power product from SLSTR instrument'
+        'description': 'Fire Radiative Power product from SLSTR instrument (v3 format)'
     })
     
     return combined_ds
