@@ -147,12 +147,12 @@ def _read_FRP_product_v2(
             else:
                 print(f"Warning: None of the requested variables found in {frp_file}")
         
-        # Rename dimensions to match v3 format for consistency
-        # This makes it easier to concatenate/process data from different versions
+        # Rename dimensions to match v3 format (2024) for consistency
+        # This conforms the older v2 format to the newer, more structured v3 naming
         dim_mapping = {
-            'fires': 'fires',  # Keep main dimension as 'fires' (standard name)
-            'fires_MWIR_alternative': 'fires_MWIR_alternative',
-            'fires_SWIR_500m': 'fires_SWIR_500m'
+            'fires': 'merged_MWIR1kmStandard_SWIR1km',  # Main merged detections
+            'fires_MWIR_alternative': 'fires_MWIR1km_alternative',  # Alternative MWIR
+            'fires_SWIR_500m': 'fires_SWIR500m'  # High-res SWIR
         }
         ds = ds.rename({k: v for k, v in dim_mapping.items() if k in ds.dims})
         
@@ -162,7 +162,7 @@ def _read_FRP_product_v2(
             'product_type': 'Sentinel-3 SLSTR L2 FRP',
             'product_format_version': 'v2',
             'reader_version': '1.0',
-            'description': 'Fire Radiative Power product from SLSTR instrument (v2 format)'
+            'description': 'Fire Radiative Power product from SLSTR instrument (v2 format, conformed to v3 naming)'
         })
         
         return ds
@@ -359,26 +359,19 @@ def _read_FRP_product_v3(
         # Merge datasets - variables with different dimensions will coexist
         combined_ds = xr.merge(datasets, compat='override', join='outer')
     
-    # Rename dimensions to standardized names for consistency with v2
-    # This makes it easier to concatenate/process data from different versions
-    dim_mapping = {
-        'merged_MWIR1kmStandard_SWIR1km': 'fires',  # Main fire detections
-        'fires_MWIR1km_standard': 'fires_MWIR_standard',
-        'fires_MWIR1km_alternative': 'fires_MWIR_alternative',
-        'fires_SWIR500m': 'fires_SWIR_500m'
-    }
-    combined_ds = combined_ds.rename({k: v for k, v in dim_mapping.items() if k in combined_ds.dims})
+    # Keep v3 dimension names as they are (the standard going forward)
+    # v2 files will be conformed to match these names
     
-    # Add dimension coordinates to match v2 format
+    # Add dimension coordinates if not present
     # This allows for easier concatenation and indexing
-    if 'fires' in combined_ds.dims and 'fires' not in combined_ds.coords:
-        combined_ds = combined_ds.assign_coords(fires=np.arange(combined_ds.sizes['fires']))
-    if 'fires_MWIR_standard' in combined_ds.dims and 'fires_MWIR_standard' not in combined_ds.coords:
-        combined_ds = combined_ds.assign_coords(fires_MWIR_standard=np.arange(combined_ds.sizes['fires_MWIR_standard']))
-    if 'fires_MWIR_alternative' in combined_ds.dims and 'fires_MWIR_alternative' not in combined_ds.coords:
-        combined_ds = combined_ds.assign_coords(fires_MWIR_alternative=np.arange(combined_ds.sizes['fires_MWIR_alternative']))
-    if 'fires_SWIR_500m' in combined_ds.dims and 'fires_SWIR_500m' not in combined_ds.coords:
-        combined_ds = combined_ds.assign_coords(fires_SWIR_500m=np.arange(combined_ds.sizes['fires_SWIR_500m']))
+    if 'merged_MWIR1kmStandard_SWIR1km' in combined_ds.dims and 'merged_MWIR1kmStandard_SWIR1km' not in combined_ds.coords:
+        combined_ds = combined_ds.assign_coords(merged_MWIR1kmStandard_SWIR1km=np.arange(combined_ds.sizes['merged_MWIR1kmStandard_SWIR1km']))
+    if 'fires_MWIR1km_standard' in combined_ds.dims and 'fires_MWIR1km_standard' not in combined_ds.coords:
+        combined_ds = combined_ds.assign_coords(fires_MWIR1km_standard=np.arange(combined_ds.sizes['fires_MWIR1km_standard']))
+    if 'fires_MWIR1km_alternative' in combined_ds.dims and 'fires_MWIR1km_alternative' not in combined_ds.coords:
+        combined_ds = combined_ds.assign_coords(fires_MWIR1km_alternative=np.arange(combined_ds.sizes['fires_MWIR1km_alternative']))
+    if 'fires_SWIR500m' in combined_ds.dims and 'fires_SWIR500m' not in combined_ds.coords:
+        combined_ds = combined_ds.assign_coords(fires_SWIR500m=np.arange(combined_ds.sizes['fires_SWIR500m']))
     
     # Add global attributes
     combined_ds.attrs.update({

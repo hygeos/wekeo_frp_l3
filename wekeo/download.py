@@ -5,7 +5,7 @@ from pathlib import Path
 from hda import Client, Configuration
 
 from wekeo import env
-
+from core import log
 
 def unzip(archive: Path, to: Path|None):
     """
@@ -30,7 +30,7 @@ def unzip(archive: Path, to: Path|None):
         with zipfile.ZipFile(archive, 'r') as zip_ref:
             zip_ref.extractall(target)
     except:
-        print(f"Failed to extract {archive} to {target}")
+        log.error(f"Failed to extract {archive} to {target}", e=None)
         return
 
 
@@ -72,11 +72,11 @@ def download(query, archive_dir: Path, extract_dir: Path|None = None, rm_archive
             
     # Download missing archives
     if missing: # query only if missing files
-        print(f"Downloading {len(missing)} missing files...")
+        log.info(f"Downloading {len(missing)} missing files...")
         query.results = missing
         query.download(download_dir=archive_dir)
     else:
-        print("All files already present locally, skipping download.")
+        log.info("All files already present locally, skipping download.")
     
     error_not_downloaded = []
     
@@ -94,8 +94,8 @@ def download(query, archive_dir: Path, extract_dir: Path|None = None, rm_archive
     if error_not_downloaded:
         if recursive_try >= max_recursive_try:
             RuntimeError(f"Error: Maximum recursive download attempts ({max_recursive_try}) reached. Some files could not be downloaded.")
-        print(f"Warning: {len(error_not_downloaded)} archives were not downloaded and could not be extracted:")
-        print("Recursively try again to download missing files.")
+        log.info(f"Warning: {len(error_not_downloaded)} archives were not downloaded and could not be extracted:")
+        log.info("Recursively try again to download missing files.")
         results = download(query, archive_dir, extract_dir, rm_archive, recursive_try + 1, max_recursive_try)
 
     return results
