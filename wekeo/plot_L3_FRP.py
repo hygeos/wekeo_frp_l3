@@ -1,0 +1,163 @@
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import numpy as np
+from matplotlib.colors import LogNorm
+import xarray as xr
+
+# ===== CONFIGURATION PARAMETERS =====
+BACKGROUND_COLOR = 'black'
+FOREGROUND_COLOR = 'white'
+LAND_COLOR = '#99AD8D'
+OCEAN_COLOR = '#000000', # '#8795CC'
+COASTLINE_COLOR = 'black'
+BORDERS_COLOR = 'black'
+STATES_COLOR = 'black'
+GRIDLINES_COLOR = 'white'
+USE_LOG_SCALE = True
+# ====================================
+
+
+def plot_L3_FRP(
+    dataset: xr.Dataset,
+    variable: str,
+    title: str = None,
+    use_log_scale: bool = USE_LOG_SCALE,
+    figsize: tuple = (16, 10),
+    cmap: str = 'plasma',
+    add_basemap: bool = True,
+):
+    """
+    Plot gridded L3 FRP data from an xarray Dataset.
+    
+    Parameters:
+    -----------
+    dataset : xr.Dataset
+        Gridded FRP dataset with latitude and longitude coordinates
+    variable : str
+        Variable to plot (e.g., 'FRP_SWIR_mean', 'FRP_MWIR_mean', 'FRP_SWIR_count')
+    title : str, optional
+        Custom title for the plot. If None, auto-generated based on variable name
+    use_log_scale : bool, optional
+        Whether to use logarithmic scale for the colorbar (default: True)
+    figsize : tuple, optional
+        Figure size (width, height) in inches
+    cmap : str, optional
+        Colormap name (default: 'plasma')
+    add_basemap : bool, optional
+        Whether to add geographic features (land, ocean, coastlines, etc.)
+    
+    Returns:
+    --------
+    fig, ax : matplotlib figure and axes objects
+    """
+    # Validate variable exists in dataset
+    if variable not in dataset.data_vars:
+        raise ValueError(
+            f"Variable '{variable}' not found in dataset. "
+            f"Available variables: {list(dataset.data_vars)}"
+        )
+    
+    # Extract data
+    data = dataset[variable]
+    lats = dataset['latitude'].values
+    lons = dataset['longitude'].values
+    
+    # Create figure and axes with projection
+    fig = plt.figure(figsize=figsize, facecolor=BACKGROUND_COLOR)
+    ax = plt.axes(projection=ccrs.PlateCarree(), facecolor=BACKGROUND_COLOR)
+    
+    # Add geographic features if requested
+    if add_basemap:
+        ax.add_feature(cfeature.LAND, facecolor=LAND_COLOR, alpha=0.8)
+        ax.add_feature(cfeature.OCEAN, facecolor=OCEAN_COLOR, alpha=0.8)
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.5, edgecolor=COASTLINE_COLOR)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle=':', edgecolor=BORDERS_COLOR)
+        ax.add_feature(cfeature.STATES, linewidth=0.3, edgecolor=STATES_COLOR)
+    
+    # Add gridlines
+    gl = ax.gridlines(draw_labels=True, linewidth=0.5, color=GRIDLINES_COLOR, alpha=0.3, linestyle='--')
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.xlabel_style = {'color': FOREGROUND_COLOR, 'size': 10}
+    gl.ylabel_style = {'color': FOREGROUND_COLOR, 'size': 10}
+    
+    # Determine if we should use log scale based on variable type and data range
+    is_count_variable = 'count' in variable.lower()
+    
+    # Prepare data for plotting
+    plot_data = data.values.copy()
+    
+    # Handle NaN values - they will be transparent in the plot
+    valid_data = plot_data[~np.isnan(plot_data)]
+    
+    if len(valid_data) == 0:
+        print(f"Warning: No valid data to plot for variable '{variable}'")
+        return fig, ax
+    
+    # Determine normalization
+    if use_log_scale and not is_count_variable:
+        # For log scale, use only positive values
+        positive_data = valid_data[valid_data > 0]
+        if len(positive_data) > 0:
+            vmin = max(positive_data.min(), 0.01)
+            vmax = positive_data.max()
+            norm = LogNorm(vmin=vmin, vmax=vmax)
+        else:
+            print(f"Warning: No positive values for log scale. Using linear scale.")
+            norm = None
+    else:
+        norm = None
+    
+    # Plot the gridded data
+    if norm is not None:
+        im = ax.pcolormesh(
+            lons, lats, plot_data,
+            transform=ccrs.PlateCarree(),
+            cmap=cmap,
+            norm=norm,
+            shading='auto'
+        )
+    else:
+        im = ax.pcolormesh(
+            lons, lats, plot_data,
+            transform=ccrs.PlateCarree(),
+            cmap=cmap,
+            shading='auto'
+        )
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.05, shrink=0.7)
+    
+    # Determine colorbar label and title
+    if title is None:
+        # Auto-generate title from variable name
+        title = variable.replace('_', ' ').title()
+    
+    # Set colorbar label
+    if 'mean' in variable.lower():
+        unit = ' (MW)' if 'FRP' in variable else ''
+        scale_note = ' [log scale]' if (use_log_scale and not is_count_variable) else ''
+        cbar.set_label(f'{variable}{unit}{scale_note}', fontsize=12, color=FOREGROUND_COLOR)
+    elif 'std' in variable.lower():
+        unit = ' (MW)' if 'FRP' in variable else ''
+        cbar.set_label(f'{variable}{unit}', fontsize=12, color=FOREGROUND_COLOR)
+    elif 'count' in variable.lower():
+        cbar.set_label(f'{variable} (number of detections)', fontsize=12, color=FOREGROUND_COLOR)
+    else:
+        cbar.set_label(variable, fontsize=12, color=FOREGROUND_COLOR)
+    
+    cbar.ax.tick_params(colors=FOREGROUND_COLOR)
+    
+    # Add statistics to title
+    n_valid_pixels = np.sum(~np.isnan(plot_data))
+    n_nonzero_pixels = np.sum((~np.isnan(plot_data)) & (plot_data > 0))
+    
+    title_with_stats = f'{title}\n({n_nonzero_pixels} non-zero pixels, {n_valid_pixels} valid pixels)'
+    plt.title(title_with_stats, fontsize=14, fontweight='bold', color=FOREGROUND_COLOR, pad=20)
+    
+    plt.tight_layout()
+    
+    return fig, ax
+
+

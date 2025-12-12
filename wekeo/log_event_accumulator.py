@@ -10,7 +10,8 @@ def accumulate_events_to_grid(
     width: int,
     height: int,
     lat_name: str = "latitude",
-    lon_name: str = "longitude"
+    lon_name: str = "longitude",
+    min_count: int = 1,
 ) -> xr.Dataset:
     """
     Accumulate event data (e.g., firepower detections) into a 2D geographic grid
@@ -62,54 +63,45 @@ def accumulate_events_to_grid(
         np.round(((lon + 180.0) * ((width - 1) / 360.0)) % width)
     )
     
-    # insert both lat_idx and lon_idx into dataset for easier grouping
-    dataset = dataset.assign_coords({
-        'lat_idx': (('nb_detection'), lat_idx),
-        'lon_idx': (('nb_detection'), lon_idx),
-    })
-    
-    # Create a multi-index for grouping by both lat and lon indices (do this once)
-    # dataset = dataset.assign({'grid_cell': (('nb_detection',), lat_idx * width + lon_idx)})
-    
     # Build the dataset by accumulating each field
     data_vars = {}
     
     for variable in variables:
-        # Group by grid cell and compute statistics
-        grouped = dataset[variable].groupby(["lat_idx", "lon_idx"])
+        # Extract data and filter out NaNs
+        data = dataset[variable].values
+        filt = ~np.isnan(data)
+        data_valid = data[filt]
+        lat_idx_valid = lat_idx[filt]
+        lon_idx_valid = lon_idx[filt]
         
-        # Compute statistics
-        mean_vals = grouped.mean()
-        std_vals = grouped.std()
-        min_vals = grouped.min()
-        max_vals = grouped.max()
-        count_vals = grouped.count()
-        
-        # Create 2D grids initialized with NaN
-        mean_grid = np.full((height, width), np.nan, dtype=np.float32)
-        std_grid = np.full((height, width), np.nan, dtype=np.float32)
-        min_grid = np.full((height, width), np.nan, dtype=np.float32)
-        max_grid = np.full((height, width), np.nan, dtype=np.float32)
+        # Initialize accumulators
+        sum_grid = np.zeros((height, width), dtype=np.float64)
+        sum_sq_grid = np.zeros((height, width), dtype=np.float64)
         count_grid = np.zeros((height, width), dtype=np.uint32)
         
-        # Fill the grids using lat_idx and lon_idx
-        for lat_i in mean_vals.lat_idx.values:
-            for lon_i in mean_vals.lon_idx.values:
-                try:
-                    mean_grid[lat_i, lon_i] = mean_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
-                    std_grid[lat_i, lon_i] = std_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
-                    min_grid[lat_i, lon_i] = min_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
-                    max_grid[lat_i, lon_i] = max_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
-                    count_grid[lat_i, lon_i] = count_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
-                except KeyError:
-                    # No data for this combination
-                    pass
+        # Accumulate using np.add.at (fast)
+        np.add.at(sum_grid, (lat_idx_valid, lon_idx_valid), data_valid)
+        np.add.at(sum_sq_grid, (lat_idx_valid, lon_idx_valid), data_valid**2)
+        np.add.at(count_grid, (lat_idx_valid, lon_idx_valid), 1)
+        
+        # Compute mean and std
+        mask = count_grid > 0
+        mean_grid = np.full((height, width), np.nan, dtype=np.float32)
+        std_grid = np.full((height, width), np.nan, dtype=np.float32)
+        mean_grid[mask] = (sum_grid[mask] / count_grid[mask]).astype(np.float32)
+        
+        # std = sqrt(E[X^2] - E[X]^2)
+        mean_sq = sum_sq_grid[mask] / count_grid[mask]
+        std_grid[mask] = np.sqrt(np.maximum(0, mean_sq - mean_grid[mask]**2)).astype(np.float32)
+        
+        # Filter cells with insufficient data
+        insufficient_data_mask = count_grid < min_count
+        mean_grid[insufficient_data_mask] = np.nan
+        std_grid[insufficient_data_mask] = np.nan
         
         # Add to data_vars dictionary
         data_vars[f'{variable}_mean'] = (('latitude', 'longitude'), mean_grid)
         data_vars[f'{variable}_std'] = (('latitude', 'longitude'), std_grid)
-        data_vars[f'{variable}_min'] = (('latitude', 'longitude'), min_grid)
-        data_vars[f'{variable}_max'] = (('latitude', 'longitude'), max_grid)
         data_vars[f'{variable}_count'] = (('latitude', 'longitude'), count_grid)
     
     # Create xarray Dataset
