@@ -59,27 +59,58 @@ def accumulate_events_to_grid(
     )
     
     lon_idx = np.uint32(
-        np.round(((lon + 180.0) * (width / 360.0)) % width)
+        np.round(((lon + 180.0) * ((width - 1) / 360.0)) % width)
     )
     
     # insert both lat_idx and lon_idx into dataset for easier grouping
     dataset = dataset.assign_coords({
         'lat_idx': (('nb_detection'), lat_idx),
         'lon_idx': (('nb_detection'), lon_idx),
-    }) 
+    })
+    
+    # Create a multi-index for grouping by both lat and lon indices (do this once)
+    # dataset = dataset.assign({'grid_cell': (('nb_detection',), lat_idx * width + lon_idx)})
     
     # Build the dataset by accumulating each field
     data_vars = {}
     
     for variable in variables:
+        # Group by grid cell and compute statistics
+        grouped = dataset[variable].groupby(["lat_idx", "lon_idx"])
         
-        pass
-    
-        # Accumulate statistics for this field
-        # dataset = _accumulate_field(
-            # dataset,
-            # variable,
-        # )
+        # Compute statistics
+        mean_vals = grouped.mean()
+        std_vals = grouped.std()
+        min_vals = grouped.min()
+        max_vals = grouped.max()
+        count_vals = grouped.count()
+        
+        # Create 2D grids initialized with NaN
+        mean_grid = np.full((height, width), np.nan, dtype=np.float32)
+        std_grid = np.full((height, width), np.nan, dtype=np.float32)
+        min_grid = np.full((height, width), np.nan, dtype=np.float32)
+        max_grid = np.full((height, width), np.nan, dtype=np.float32)
+        count_grid = np.zeros((height, width), dtype=np.uint32)
+        
+        # Fill the grids using lat_idx and lon_idx
+        for lat_i in mean_vals.lat_idx.values:
+            for lon_i in mean_vals.lon_idx.values:
+                try:
+                    mean_grid[lat_i, lon_i] = mean_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
+                    std_grid[lat_i, lon_i] = std_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
+                    min_grid[lat_i, lon_i] = min_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
+                    max_grid[lat_i, lon_i] = max_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
+                    count_grid[lat_i, lon_i] = count_vals.sel(lat_idx=lat_i, lon_idx=lon_i).values
+                except KeyError:
+                    # No data for this combination
+                    pass
+        
+        # Add to data_vars dictionary
+        data_vars[f'{variable}_mean'] = (('latitude', 'longitude'), mean_grid)
+        data_vars[f'{variable}_std'] = (('latitude', 'longitude'), std_grid)
+        data_vars[f'{variable}_min'] = (('latitude', 'longitude'), min_grid)
+        data_vars[f'{variable}_max'] = (('latitude', 'longitude'), max_grid)
+        data_vars[f'{variable}_count'] = (('latitude', 'longitude'), count_grid)
     
     # Create xarray Dataset
     result_ds = xr.Dataset(
