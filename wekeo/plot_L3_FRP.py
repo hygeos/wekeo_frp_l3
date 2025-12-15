@@ -9,7 +9,7 @@ import xarray as xr
 BACKGROUND_COLOR = 'black'
 FOREGROUND_COLOR = 'white'
 LAND_COLOR = '#99AD8D'
-OCEAN_COLOR = '#000000', # '#8795CC'
+OCEAN_COLOR = "#242829" # '#8795CC'
 COASTLINE_COLOR = 'black'
 BORDERS_COLOR = 'black'
 STATES_COLOR = 'black'
@@ -24,7 +24,7 @@ def plot_L3_FRP(
     title: str = None,
     use_log_scale: bool = USE_LOG_SCALE,
     figsize: tuple = (16, 10),
-    cmap: str = 'plasma',
+    cmap: str = 'autumn',
     add_basemap: bool = True,
 ):
     """
@@ -87,6 +87,11 @@ def plot_L3_FRP(
     
     # Prepare data for plotting
     plot_data = data.values.copy()
+    
+    # For count variables, set zero values to NaN so they appear transparent
+    if is_count_variable:
+        plot_data = plot_data.astype(float)
+        plot_data[plot_data <= 0] = np.nan
     
     # Handle NaN values - they will be transparent in the plot
     valid_data = plot_data[~np.isnan(plot_data)]
