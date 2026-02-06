@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib.colors import LogNorm
 from pathlib import Path
 
-from wekeo.reader import read_FRP_product
+from wekeo_frp_l3.reader import read_FRP_product
 
 # ===== CONFIGURATION PARAMETERS =====
 BACKGROUND_COLOR = 'black'
