@@ -15,4 +15,3 @@ debug = print
 info = print
 warning = print
 error = _print_raise
-

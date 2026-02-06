@@ -5,7 +5,7 @@ from pathlib import Path
 from hda import Client, Configuration
 
 from wekeo_frp_l3 import env
-from wekeo_frp_l3.stubs.log import log
+from wekeo_frp_l3.stubs import log
 
 def unzip(archive: Path, to: Path|None):
     """
