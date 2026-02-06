@@ -5,8 +5,17 @@
 
 ## Introduction
 
-Fire Radiative Power 
+Fire Radiative Power Level3
 wekeo eumetsat project 
+
+## Preview
+
+
+---
+
+![FRP level3 example](img/level3.png)
+
+---
 
 ## Installation
 
