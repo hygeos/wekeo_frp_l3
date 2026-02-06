@@ -4,9 +4,12 @@ version = "0.1.0"
 description = "wekeo eumetsat project"
 requires-python = ">= 3.10"
 authors = [{name = "HYGEOS", email = "contact@hygeos.com"}]
-dependencies = ["hda"
-    
-, "xarray", "core[git] @ git+https://github.com/hygeos/core", "cartopy"]
+dependencies = [
+    "hda", 
+    "xarray", 
+    "cartopy", 
+    "netcdf4"
+]
 
 [build-system]
 requires = ["setuptools>=42"]
@@ -35,6 +38,8 @@ pytest-xdist = "*"
 hda = "*"
 xarray = "*"
 cartopy = "*"
+python-dotenv = "*"
+netcdf4 = "*"
 
 [tool.pixi.environments]
 default = { features = ['sys', 'sub', 'dev'], solve-group = "default" }

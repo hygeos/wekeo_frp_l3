@@ -72,10 +72,10 @@ def read_FRP_product(
     has_frp_in_file = (product_path / 'FRP_in.nc').exists()
     
     if has_merged_file:
-        # Newer format (2024+) - v3
+        # Newer format
         return _read_FRP_product_v3(product_path, variables, decode_times, chunks)
     elif has_frp_in_file:
-        # Older format (2022 and earlier) - v2
+        # Older format
         return _read_FRP_product_v2(product_path, variables, decode_times, chunks)
     else:
         raise ValueError(
@@ -322,31 +322,31 @@ def _read_FRP_product_v3(
             print(f"Warning: File {group_info['file']} not found, skipping")
             continue
         
-        try:
-            ds = xr.open_dataset(nc_file, decode_times=decode_times, chunks=chunks)
-            
-            # Filter to requested variables (if they exist in this file)
-            available_vars = [v for v in variables if v in ds.variables]
-            if available_vars:
-                # Keep the dimension coordinate plus requested variables
-                dim_name = group_info['dimension']
-                if isinstance(dim_name, tuple):
-                    coords_to_keep = list(dim_name)
-                else:
-                    coords_to_keep = [dim_name] if dim_name in ds.coords else []
-                
-                vars_to_keep = list(set(available_vars + coords_to_keep))
-                ds = ds[vars_to_keep]
-                
-                # Add metadata
-                ds.attrs['source_file'] = group_info['file']
-                ds.attrs['dimension'] = str(dim_name)
-                
-                datasets.append(ds)
+        # try:
+        ds = xr.open_dataset(nc_file, decode_times=decode_times, chunks=chunks)
         
-        except Exception as e:
-            print(f"Error reading {nc_file}: {e}")
-            continue
+        # Filter to requested variables (if they exist in this file)
+        available_vars = [v for v in variables if v in ds.variables]
+        if available_vars:
+            # Keep the dimension coordinate plus requested variables
+            dim_name = group_info['dimension']
+            if isinstance(dim_name, tuple):
+                coords_to_keep = list(dim_name)
+            else:
+                coords_to_keep = [dim_name] if dim_name in ds.coords else []
+            
+            vars_to_keep = list(set(available_vars + coords_to_keep))
+            ds = ds[vars_to_keep]
+            
+            # Add metadata
+            ds.attrs['source_file'] = group_info['file']
+            ds.attrs['dimension'] = str(dim_name)
+            
+            datasets.append(ds)
+        
+        # except Exception as e:
+        #     print(f"Error reading {nc_file}: {e}")
+        #     continue
     
     if not datasets:
         raise ValueError("No valid datasets could be read")

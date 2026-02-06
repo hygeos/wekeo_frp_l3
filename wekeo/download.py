@@ -5,7 +5,7 @@ from pathlib import Path
 from hda import Client, Configuration
 
 from wekeo import env
-from core import log
+from wekeo.stubs.log import log
 
 def unzip(archive: Path, to: Path|None):
     """

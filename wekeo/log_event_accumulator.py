@@ -136,6 +136,13 @@ def accumulate_events_to_grid(
         coords={
             'latitude': lat_coords,
             'longitude': lon_coords,
+        },
+        attrs={
+            'description': 'Accumulated FRP event data on an equirectangular grid',
+            'grid_width': width,
+            'grid_height': height,
+            'date': dataset.attrs.get('date', 'unknown'),
+            'source_files': "\n".join(dataset.attrs.get('source_files', [])),
         }
     )
     

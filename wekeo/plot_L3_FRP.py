@@ -4,6 +4,7 @@ import cartopy.feature as cfeature
 import numpy as np
 from matplotlib.colors import LogNorm
 import xarray as xr
+from pathlib import Path
 
 # ===== CONFIGURATION PARAMETERS =====
 BACKGROUND_COLOR = 'black'
@@ -15,6 +16,7 @@ BORDERS_COLOR = 'black'
 STATES_COLOR = 'black'
 GRIDLINES_COLOR = 'white'
 USE_LOG_SCALE = True
+FONT_SIZE = 20
 # ====================================
 
 
@@ -26,6 +28,9 @@ def plot_L3_FRP(
     figsize: tuple = (16, 10),
     cmap: str = 'autumn',
     add_basemap: bool = True,
+    vmin: float = None,
+    vmax: float = None,
+    save_fig_dir: str = None,
 ):
     """
     Plot gridded L3 FRP data from an xarray Dataset.
@@ -46,6 +51,13 @@ def plot_L3_FRP(
         Colormap name (default: 'plasma')
     add_basemap : bool, optional
         Whether to add geographic features (land, ocean, coastlines, etc.)
+    vmin : float, optional
+        Minimum value for the colormap scale. If None, auto-determined from data
+    vmax : float, optional
+        Maximum value for the colormap scale. If None, auto-determined from data
+    save_fig_dir : str, optional
+        Directory path to save the figure. If None, figure is not saved.
+        Filename will be auto-generated based on variable name.
     
     Returns:
     --------
@@ -105,14 +117,22 @@ def plot_L3_FRP(
         # For log scale, use only positive values
         positive_data = valid_data[valid_data > 0]
         if len(positive_data) > 0:
-            vmin = max(positive_data.min(), 0.01)
-            vmax = positive_data.max()
+            # Use provided vmin/vmax or auto-determine from data
+            if vmin is None:
+                vmin = max(positive_data.min(), 0.01)
+            if vmax is None:
+                vmax = positive_data.max()
             norm = LogNorm(vmin=vmin, vmax=vmax)
         else:
             print(f"Warning: No positive values for log scale. Using linear scale.")
             norm = None
     else:
-        norm = None
+        # Linear scale or count variable
+        if vmin is not None or vmax is not None:
+            # Manual vmin/vmax specified, but no log scale
+            norm = None  # Will pass vmin/vmax directly to pcolormesh
+        else:
+            norm = None
     
     # Plot the gridded data
     if norm is not None:
@@ -124,10 +144,13 @@ def plot_L3_FRP(
             shading='auto'
         )
     else:
+        # Linear scale - apply vmin/vmax directly if provided
         im = ax.pcolormesh(
             lons, lats, plot_data,
             transform=ccrs.PlateCarree(),
             cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
             shading='auto'
         )
     
@@ -143,14 +166,14 @@ def plot_L3_FRP(
     if 'mean' in variable.lower():
         unit = ' (MW)' if 'FRP' in variable else ''
         scale_note = ' [log scale]' if (use_log_scale and not is_count_variable) else ''
-        cbar.set_label(f'{variable}{unit}{scale_note}', fontsize=12, color=FOREGROUND_COLOR)
+        cbar.set_label(f'{variable}{unit}{scale_note}', fontsize=FONT_SIZE, color=FOREGROUND_COLOR)
     elif 'std' in variable.lower():
         unit = ' (MW)' if 'FRP' in variable else ''
-        cbar.set_label(f'{variable}{unit}', fontsize=12, color=FOREGROUND_COLOR)
+        cbar.set_label(f'{variable}{unit}', fontsize=FONT_SIZE, color=FOREGROUND_COLOR)
     elif 'count' in variable.lower():
-        cbar.set_label(f'{variable} (number of detections)', fontsize=12, color=FOREGROUND_COLOR)
+        cbar.set_label(f'{variable} (number of detections)', fontsize=FONT_SIZE, color=FOREGROUND_COLOR)
     else:
-        cbar.set_label(variable, fontsize=12, color=FOREGROUND_COLOR)
+        cbar.set_label(variable, fontsize=FONT_SIZE, color=FOREGROUND_COLOR)
     
     cbar.ax.tick_params(colors=FOREGROUND_COLOR)
     
@@ -159,9 +182,19 @@ def plot_L3_FRP(
     n_nonzero_pixels = np.sum((~np.isnan(plot_data)) & (plot_data > 0))
     
     title_with_stats = f'{title}\n({n_nonzero_pixels} non-zero pixels, {n_valid_pixels} valid pixels)'
-    plt.title(title_with_stats, fontsize=14, fontweight='bold', color=FOREGROUND_COLOR, pad=20)
+    plt.title(title_with_stats, fontsize=FONT_SIZE * 1.25, fontweight='bold', color=FOREGROUND_COLOR, pad=20)
     
     plt.tight_layout()
+    
+    # Save figure if directory is provided
+    if save_fig_dir is not None:
+        save_dir = Path(save_fig_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        day = dataset.attrs['date']
+        filename = f"FRP_L3_{day}_{variable}.png"
+        filepath = save_dir / filename
+        plt.savefig(filepath, dpi=300, bbox_inches='tight', facecolor=BACKGROUND_COLOR)
+        print(f"Figure saved to: {filepath}")
     
     return fig, ax
 
