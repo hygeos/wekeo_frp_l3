@@ -1,4 +1,6 @@
 import zipfile
+import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -29,8 +31,8 @@ def unzip(archive: Path, to: Path|None):
     try:
         with zipfile.ZipFile(archive, 'r') as zip_ref:
             zip_ref.extractall(target)
-    except:
-        log.error(f"Failed to extract {archive} to {target}", e=None)
+    except Exception as e:
+        log.error(f"Failed to extract {archive} to {target}: {e}", e=None)
         return
 
 
@@ -40,63 +42,115 @@ def download(query, archive_dir: Path, extract_dir: Path|None = None, rm_archive
         
         Args:
             query: SearchResults object containing items to download
-            archive_dir: Path where archive files will be downloaded
+            archive_dir: Path where archive files will be downloaded (and stored if not removed)
             extract_dir: Path where archives files will be extracted
-            remove_archive: bool, whether to remove archive after extraction (default: False)
+            rm_archive: bool, whether to remove archive after extraction (default: False)
         
         Returns:
-            None
+            list[Path]: List of all target paths (extracted directories)
     """
     
     if extract_dir is None: extract_dir=archive_dir
+    extract_dir = Path(extract_dir)
+    archive_dir = Path(archive_dir)
     
-    missing = [] # archives to download
-    extract = [] # archives to extract after download
+    missing = [] # items to download
+    local_archives = [] # archives already present to extract
     results = [] # all extracted paths
     
-    for item in query.results:
-        
-        archive_path = archive_dir / f"{item['id']}.zip"
+    # Create a copy of items to iterate safely
+    all_items = list(query.results)
+    
+    for item in all_items:
         extract_path = extract_dir / item['id']
+        archive_path = archive_dir / f"{item['id']}.zip"
         results.append(extract_path)
         
-        if extract_path.exists() == True:
-            continue                        # already extracted, skip
+        if extract_path.exists():
+            continue
             
-        elif archive_path.exists() == True: # archive exists locally but not extracted
-            extract.append(archive_path)    # queue archive for extraction after download
-            
+        elif archive_path.exists():
+            local_archives.append(archive_path)
         else:
-            missing.append(item)            # archive missing, queue for download   
-            extract.append(archive_path)    # queue archive for extraction after download
+            missing.append(item)
             
-    # Download missing archives
-    if missing: # query only if missing files
-        log.info(f"Downloading {len(missing)} missing files...")
-        query.results = missing
-        query.download(download_dir=archive_dir)
-    else:
-        log.info("All files already present locally, skipping download.")
-    
-    error_not_downloaded = []
-    
-    # Extract downloaded archives
-    if extract:
-        for archive in extract:
-            if not archive.exists():
-                error_not_downloaded.append(archive)
-                continue
-            
-            unzip(archive, to=extract_dir)
-            if rm_archive:
-                archive.unlink()  # remove archive after extraction
+    # Process local archives first
+    for archive in local_archives:
+        unzip(archive, to=extract_dir)
+        
+        # Verify extraction success for local archives
+        expected_extracted_path = extract_dir / archive.stem
+        if not expected_extracted_path.exists():
+            log.info(f"Failed to extract existing archive {archive.name}. Deleting it to re-download.")
+            try:
+                archive.unlink()
+            except Exception as e:
+                log.error(f"Failed to delete corrupt archive {archive}: {e}")
+        elif rm_archive:
+            try: archive.unlink()
+            except: pass
 
-    if error_not_downloaded:
+    # Download missing items with temp folder strategy
+    if missing:
+        log.info(f"Downloading {len(missing)} missing files...")
+        
+        # Configure query to download only missing items
+        query.results = missing
+        
+        with tempfile.TemporaryDirectory() as tmp_dir_name:
+            tmp_dir = Path(tmp_dir_name)
+            
+            try:
+                query.download(download_dir=tmp_dir)
+            except Exception as e:
+                log.error(f"Download error: {e}")
+                
+            # Process downloaded files in temp dir
+            for item in missing:
+                tmp_archive = tmp_dir / f"{item['id']}.zip"
+                
+                if not tmp_archive.exists():
+                    log.error(f"File {tmp_archive.name} not found after download.")
+                    continue
+                
+                # Unzip in temp
+                unzip(tmp_archive, to=tmp_dir)
+                
+                tmp_extracted = tmp_dir / item['id']
+                final_extracted = extract_dir / item['id']
+                final_archive = archive_dir / f"{item['id']}.zip"
+                
+                if tmp_extracted.exists():
+                    # Move extracted content to final destination
+                    if final_extracted.exists():
+                        shutil.rmtree(final_extracted)
+                    shutil.move(str(tmp_extracted), str(final_extracted))
+                    
+                    # Move archive to final destination if keeping it
+                    if not rm_archive:
+                        if final_archive.exists():
+                            final_archive.unlink()
+                        shutil.move(str(tmp_archive), str(final_archive))
+                else:
+                    log.error(f"Extraction failed for {tmp_archive.name}")
+    else:
+        if not local_archives and recursive_try == 0:
+             log.info("All files already present locally, skipping download.")
+
+    # Check for failures and recurse if needed
+    failed_items = []
+    for item in all_items:
+        extract_path = extract_dir / item['id']
+        if not extract_path.exists():
+            failed_items.append(item)
+
+    if failed_items:
         if recursive_try >= max_recursive_try:
-            RuntimeError(f"Error: Maximum recursive download attempts ({max_recursive_try}) reached. Some files could not be downloaded.")
-        log.info(f"Warning: {len(error_not_downloaded)} archives were not downloaded and could not be extracted:")
-        log.info("Recursively try again to download missing files.")
-        results = download(query, archive_dir, extract_dir, rm_archive, recursive_try + 1, max_recursive_try)
+            raise RuntimeError(f"Error: Maximum recursive download attempts ({max_recursive_try}) reached. {len(failed_items)} files failed.")
+            
+        log.info(f"Warning: {len(failed_items)} files failed processing. Retrying...")
+        query.results = failed_items
+        download(query, archive_dir, extract_dir, rm_archive, recursive_try + 1, max_recursive_try)
 
     return results
 
