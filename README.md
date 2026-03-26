@@ -56,15 +56,16 @@ These variables define paths for storing downloaded data and generated outputs. 
 
 The project includes two main Jupyter notebooks located in the `notebooks/` directory:
 
-### main.ipynb
+### level3.ipynb
+This notebook performs the FRP total pipeline:
+- Downloads and compiles multiple FRP files into a single log event dataset (L2 combinations)
+- Saves the compiled log event to NetCDF format
+- Computes gridded L3 data (equirectangular projection) from the log events
+- Plots the gridded L3 FRP data
+
+### level2.ipynb
 This notebook demonstrates basic FRP (Fire Radiative Power) data processing:
 - Downloads FRP products for a specified date and area
 - Reads specific variables from the downloaded products
 - Plots FRP data for both SWIR and MWIR bands
 
-### level3.ipynb
-This notebook performs L3 aggregation FRP processing:
-- Downloads and compiles multiple FRP files into a single log event dataset
-- Saves the compiled log event to NetCDF format
-- Computes gridded L3 data (equirectangular projection) from the log events
-- Generates plots of the gridded FRP data
