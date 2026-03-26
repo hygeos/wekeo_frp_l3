@@ -1,3 +1,5 @@
+from typing import Literal
+
 import xarray as xr
 import numpy as np
 
@@ -73,62 +75,78 @@ def accumulate_events_to_grid(
             
         # Extract data and filter out NaNs
         data = dataset[name].values
-        filt = ~np.isnan(data) & (data > 0)
+        base_filt = ~np.isnan(data) & (data > 0)
+        sza = dataset["sza"].values
         
-        if "no_SAA" in variable: # only consider values where confidence_SWIR_SAA <= 0 then
-            filt &= (dataset["confidence_SWIR_SAA"].values <= 0)
+        
+        for mode in ["day", "night"]:
             
-        data_valid = data[filt]
-        lat_idx_valid = lat_idx[filt]
-        lon_idx_valid = lon_idx[filt]
-        
-        # Initialize accumulators
-        sum_grid = np.zeros((height, width), dtype=np.float64)
-        sum_sq_grid = np.zeros((height, width), dtype=np.float64)
-        count_grid = np.zeros((height, width), dtype=np.int32)
-        
-        # Accumulate using np.add.at (fast)
-        np.add.at(sum_grid, (lat_idx_valid, lon_idx_valid), data_valid)
-        np.add.at(sum_sq_grid, (lat_idx_valid, lon_idx_valid), data_valid**2)
-        np.add.at(count_grid, (lat_idx_valid, lon_idx_valid), 1)
+            if mode == "day":
+                filt = base_filt & (sza <= 90) # only consider values where sun is above horizon
+            elif mode == "night":
+                filt = base_filt & (sza > 90) # only consider values where sun is below horizon
+            else:
+                raise ValueError(f"Invalid mode: {mode}. Expected 'day' or 'night'.")
+            
+            if "no_SAA" in variable: # only consider values where confidence_SWIR_SAA <= 0 then
+                filt &= (dataset["confidence_SWIR_SAA"].values <= 0)
+            
+            def pct(expr): return f"{(np.sum(expr) / np.size(expr) * 100):.1f}%"
+            
+            
+            print(f"Percent of valid data for {variable}: {pct(filt)} at {mode}")
+            
+            data_valid = data[filt]
+            lat_idx_valid = lat_idx[filt]
+            lon_idx_valid = lon_idx[filt]
+            
+            # Initialize accumulators
+            sum_grid = np.zeros((height, width), dtype=np.float64)
+            sum_sq_grid = np.zeros((height, width), dtype=np.float64)
+            count_grid = np.zeros((height, width), dtype=np.int32)
+            
+            # Accumulate using np.add.at (fast)
+            np.add.at(sum_grid, (lat_idx_valid, lon_idx_valid), data_valid)
+            np.add.at(sum_sq_grid, (lat_idx_valid, lon_idx_valid), data_valid**2)
+            np.add.at(count_grid, (lat_idx_valid, lon_idx_valid), 1)
 
-        # select min/max raster by raster 
-        # Initialize with appropriate values
-        min_grid = np.full((height, width), np.inf, dtype=np.float32)
-        max_grid = np.full((height, width), -np.inf, dtype=np.float32)
+            # select min/max raster by raster 
+            # Initialize with appropriate values
+            min_grid = np.full((height, width), np.inf, dtype=np.float32)
+            max_grid = np.full((height, width), -np.inf, dtype=np.float32)
 
-        # Accumulate min/max values directly
-        np.minimum.at(min_grid, (lat_idx_valid, lon_idx_valid), data_valid)
-        np.maximum.at(max_grid, (lat_idx_valid, lon_idx_valid), data_valid)
-        
-        # Compute mean and std
-        mask = count_grid > 0
-        mean_grid = np.full((height, width), np.nan, dtype=np.float32)
-        std_grid = np.full((height, width), np.nan, dtype=np.float32)
-        mean_grid[mask] = (sum_grid[mask] / count_grid[mask]).astype(np.float32)
-        
-        # std = sqrt(E[X^2] - E[X]^2)
-        mean_sq = sum_sq_grid[mask] / count_grid[mask]
-        std_grid[mask] = np.sqrt(np.maximum(0, mean_sq - mean_grid[mask]**2)).astype(np.float32)
-        
-        # Filter cells with insufficient data
-        insufficient_data_mask = count_grid < min_count
-        mean_grid[insufficient_data_mask] = np.nan
-        std_grid[insufficient_data_mask] = np.nan
-        min_grid[insufficient_data_mask] = np.nan
-        max_grid[insufficient_data_mask] = np.nan
-        count_grid[insufficient_data_mask] = -1
-        
-        # remove infs from min/max grids
-        min_grid[np.isinf(min_grid)] = np.nan
-        max_grid[np.isinf(max_grid)] = np.nan
-        
-        # Add to data_vars dictionary
-        data_vars[f'{variable}_mean'] = (('latitude', 'longitude'), mean_grid)
-        data_vars[f'{variable}_std'] = (('latitude', 'longitude'), std_grid)
-        data_vars[f'{variable}_count'] = (('latitude', 'longitude'), count_grid)
-        data_vars[f'{variable}_min'] = (('latitude', 'longitude'), min_grid)
-        data_vars[f'{variable}_max'] = (('latitude', 'longitude'), max_grid)
+            # Accumulate min/max values directly
+            np.minimum.at(min_grid, (lat_idx_valid, lon_idx_valid), data_valid)
+            np.maximum.at(max_grid, (lat_idx_valid, lon_idx_valid), data_valid)
+            
+            # Compute mean and std
+            mask = count_grid > 0
+            mean_grid = np.full((height, width), np.nan, dtype=np.float32)
+            std_grid = np.full((height, width), np.nan, dtype=np.float32)
+            mean_grid[mask] = (sum_grid[mask] / count_grid[mask]).astype(np.float32)
+            
+            # std = sqrt(E[X^2] - E[X]^2)
+            mean_sq = sum_sq_grid[mask] / count_grid[mask]
+            std_grid[mask] = np.sqrt(np.maximum(0, mean_sq - mean_grid[mask]**2)).astype(np.float32)
+            
+            # Filter cells with insufficient data
+            insufficient_data_mask = count_grid < min_count
+            mean_grid[insufficient_data_mask] = np.nan
+            std_grid[insufficient_data_mask] = np.nan
+            min_grid[insufficient_data_mask] = np.nan
+            max_grid[insufficient_data_mask] = np.nan
+            count_grid[insufficient_data_mask] = -1
+            
+            # remove infs from min/max grids
+            min_grid[np.isinf(min_grid)] = np.nan
+            max_grid[np.isinf(max_grid)] = np.nan
+            
+            # Add to data_vars dictionary
+            data_vars[mode+f'_{variable}_mean'] = (('latitude', 'longitude'), mean_grid)
+            data_vars[mode+f'_{variable}_std'] = (('latitude', 'longitude'), std_grid)
+            data_vars[mode+f'_{variable}_count'] = (('latitude', 'longitude'), count_grid)
+            data_vars[mode+f'_{variable}_min'] = (('latitude', 'longitude'), min_grid)
+            data_vars[mode+f'_{variable}_max'] = (('latitude', 'longitude'), max_grid)
     
     # Create xarray Dataset
     result_ds = xr.Dataset(

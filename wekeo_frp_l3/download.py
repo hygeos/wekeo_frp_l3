@@ -7,7 +7,7 @@ from pathlib import Path
 from hda import Client, Configuration
 
 from wekeo_frp_l3 import env
-from wekeo_frp_l3.stubs import log
+from wekeo_frp_l3.hygeos_core import log
 
 def unzip(archive: Path, to: Path|None):
     """
