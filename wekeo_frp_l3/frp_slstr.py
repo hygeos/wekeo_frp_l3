@@ -72,8 +72,11 @@ def grid_log_event(
     """
     Accumulate the Log Event dataset into a gridded level 3 dataset.
     """
+    
+    version = "v1"
+    
     day = log_event.attrs['date']
-    gridded_l3_output_file = config.gridded_log_event_dir / f"FRP_SLSTR_grid{width}_{day}.nc"
+    gridded_l3_output_file = config.gridded_log_event_dir / f"FRP_SLSTR_grid{width}_{day}_mc{min_count}_{version}.nc"
     
     if gridded_l3_output_file.exists() and use_cache:
         log.info(f"Gridded FRP dataset already exists for date {day}, grid {width}, loading from {gridded_l3_output_file}")
