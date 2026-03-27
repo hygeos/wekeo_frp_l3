@@ -95,3 +95,32 @@ def grid_log_event(
         ds.to_netcdf(gridded_l3_output_file, mode="w")
     
     return ds
+
+
+
+
+def get_gridded_frp_slstr_l3(
+    day: date,
+    width: int = 3272,     
+    lat_name: str = "latitude",
+    lon_name: str = "longitude",
+    min_count: int = 1,
+    save_result: bool = False,
+    use_cache: bool = False
+) -> xr.Dataset:
+    """
+    Accumulate the Log Event dataset into a gridded level 3 dataset.
+    """
+    log_event = get_log_event(day, save_result=save_result, use_cache=use_cache)
+    ds = grid_log_event(
+        log_event,
+        width=width,
+        lat_name=lat_name,
+        lon_name=lon_name,
+        min_count=min_count,
+        save_result=save_result,
+        use_cache=use_cache
+    )
+    
+    return ds
+    
