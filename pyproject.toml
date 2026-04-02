@@ -1,6 +1,6 @@
 [project]
 name = "wekeo_frp_l3"
-version = "0.1.0"
+version = "0.2.0"
 description = "wekeo eumetsat project"
 requires-python = ">= 3.10"
 authors = [{name = "HYGEOS", email = "contact@hygeos.com"}]
