@@ -6,6 +6,7 @@ from pathlib import Path
 from hda import Client
 
 from wekeo_frp_l3 import env
+from wekeo_frp_l3 import config
 from wekeo_frp_l3.hygeos_core import log
 
 def unzip(archive: Path, to: Path|None):
@@ -36,7 +37,32 @@ def unzip(archive: Path, to: Path|None):
         return None
 
 
-def download(query, archive_dir: Path, extract_dir: Path|None = None, rm_archive: bool = False, recursive_try = 0, max_recursive_try = 3):
+def save_failed_archive(archive: Path):
+    """Copy a failed archive to the configured failed folder for diagnostics."""
+    try:
+        archive = Path(archive)
+        if not archive.exists():
+            return
+
+        destination = config.failed_fpr_dir / archive.name
+        if destination.exists():
+            ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")
+            destination = config.failed_fpr_dir / f"{archive.stem}__{ts}{archive.suffix}"
+
+        shutil.copy2(archive, destination)
+        log.info(f"Copied failed archive {archive.name} to {destination}")
+    except Exception as e:
+        log.error(f"Failed to copy failed archive {archive} to {config.failed_fpr_dir}: {e}")
+
+
+def download(
+    query,
+    archive_dir: Path,
+    extract_dir: Path | None = None,
+    rm_archive: bool = False,
+    recursive_try=0,
+    max_recursive_try=3,
+):
     """
     Download files from query results, skipping files that already exist locally.
         
@@ -50,98 +76,115 @@ def download(query, archive_dir: Path, extract_dir: Path|None = None, rm_archive
             list[Path]: List of all target paths (extracted directories)
     """
     
-    if extract_dir is None: extract_dir=archive_dir
-    extract_dir = Path(extract_dir)
-    archive_dir = Path(archive_dir)
-    extract_dir.mkdir(parents=True, exist_ok=True)
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    
-    missing = [] # items to download
-    local_archives = [] # archives already present to extract
-    results = [] # all extracted paths
-    
-    # Create a copy of items to iterate safely
-    all_items = list(query.results)
-    
-    for item in all_items:
-        extract_path = extract_dir / item['id']
-        archive_path = archive_dir / f"{item['id']}.zip"
-        results.append(extract_path)
-        
-        if extract_path.exists():
-            continue
-            
-        elif archive_path.exists():
-            local_archives.append(archive_path)
-        else:
-            missing.append(item)
-            
-    # Process local archives first
-    for archive in local_archives:
-        extracted = unzip(archive, to=extract_dir)
-        
-        # Verify extraction success for local archives
-        expected_extracted_path = extract_dir / archive.stem
-        if extracted is None or not expected_extracted_path.exists():
-            log.info(f"Failed to extract existing archive {archive.name}. Deleting it to re-download.")
-            try:
-                archive.unlink()
-            except Exception as e:
-                log.error(f"Failed to delete corrupt archive {archive}: {e}")
-        elif rm_archive:
-            try: archive.unlink()
-            except: pass
+    incoming_query_results = list(query.results)
+    try:
+        if extract_dir is None:
+            extract_dir = archive_dir
+        extract_dir = Path(extract_dir)
+        archive_dir = Path(archive_dir)
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        archive_dir.mkdir(parents=True, exist_ok=True)
 
-    # Download missing items one by one so successful files are persisted immediately.
-    if missing:
-        log.info(f"Downloading {len(missing)} missing files...")
-        for item in missing:
-            archive_path = archive_dir / f"{item['id']}.zip"
-            extract_path = extract_dir / item['id']
+        # Always return paths for the original request scope.
+        requested_items = list(query.results)
+        requested_ids = [item['id'] for item in requested_items]
+        results = [extract_dir / item_id for item_id in requested_ids]
 
-            # Configure query to download only the current item.
-            query.results = [item]
+        attempt = recursive_try
+        items_to_process = requested_items
 
-            try:
-                query.download(download_dir=archive_dir)
-            except Exception as e:
-                log.error(f"Download error for {item['id']}: {e}")
-                continue
+        while True:
+            missing = []  # items to download
+            local_archives = []  # archives already present to extract
 
-            if not archive_path.exists():
-                log.error(f"File {archive_path.name} not found after download.")
-                continue
+            for item in items_to_process:
+                extract_path = extract_dir / item['id']
+                archive_path = archive_dir / f"{item['id']}.zip"
 
-            extracted = unzip(archive_path, to=extract_dir)
-            if extracted is None or not extract_path.exists():
-                log.error(f"Extraction failed for {archive_path.name}")
-                continue
+                if extract_path.exists():
+                    continue
 
-            if rm_archive:
-                try:
-                    archive_path.unlink()
-                except Exception as e:
-                    log.error(f"Failed to delete archive {archive_path}: {e}")
-    else:
-        if not local_archives and recursive_try == 0:
-             log.info("All files already present locally, skipping download.")
+                if archive_path.exists():
+                    local_archives.append(archive_path)
+                else:
+                    missing.append(item)
 
-    # Check for failures and recurse if needed
-    failed_items = []
-    for item in all_items:
-        extract_path = extract_dir / item['id']
-        if not extract_path.exists():
-            failed_items.append(item)
+            # Process local archives first.
+            for archive in local_archives:
+                extracted = unzip(archive, to=extract_dir)
 
-    if failed_items:
-        if recursive_try >= max_recursive_try:
-            raise RuntimeError(f"Error: Maximum recursive download attempts ({max_recursive_try}) reached. {len(failed_items)} files failed.")
-            
-        log.info(f"Warning: {len(failed_items)} files failed processing. Retrying...")
-        query.results = failed_items
-        return download(query, archive_dir, extract_dir, rm_archive, recursive_try + 1, max_recursive_try)
+                # Verify extraction success for local archives.
+                expected_extracted_path = extract_dir / archive.stem
+                if extracted is None or not expected_extracted_path.exists():
+                    log.info(f"Failed to extract existing archive {archive.name}. Deleting it to re-download.")
+                    save_failed_archive(archive)
+                    try:
+                        archive.unlink()
+                    except Exception as e:
+                        log.error(f"Failed to delete corrupt archive {archive}: {e}")
+                elif rm_archive:
+                    try:
+                        archive.unlink()
+                    except Exception:
+                        pass
 
-    return results
+            # Download missing items one by one so successful files are persisted immediately.
+            if missing:
+                log.info(f"Downloading {len(missing)} missing files...")
+                for item in missing:
+                    archive_path = archive_dir / f"{item['id']}.zip"
+                    extract_path = extract_dir / item['id']
+
+                    # Temporarily scope query to a single item for download, then restore it.
+                    previous_results = list(query.results)
+                    query.results = [item]
+
+                    try:
+                        query.download(download_dir=archive_dir)
+                    except Exception as e:
+                        log.error(f"Download error for {item['id']}: {e}")
+                        continue
+                    finally:
+                        query.results = previous_results
+
+                    if not archive_path.exists():
+                        log.error(f"File {archive_path.name} not found after download.")
+                        continue
+
+                    extracted = unzip(archive_path, to=extract_dir)
+                    if extracted is None or not extract_path.exists():
+                        log.error(f"Extraction failed for {archive_path.name}")
+                        save_failed_archive(archive_path)
+                        continue
+
+                    if rm_archive:
+                        try:
+                            archive_path.unlink()
+                        except Exception as e:
+                            log.error(f"Failed to delete archive {archive_path}: {e}")
+            elif not local_archives and attempt == 0:
+                log.info("All files already present locally, skipping download.")
+
+            # Check for failures and retry if needed.
+            failed_items = []
+            for item in items_to_process:
+                extract_path = extract_dir / item['id']
+                if not extract_path.exists():
+                    failed_items.append(item)
+
+            if not failed_items:
+                break
+
+            if attempt >= max_recursive_try:
+                raise RuntimeError(f"Error: Maximum recursive download attempts ({max_recursive_try}) reached. {len(failed_items)} files failed.")
+
+            log.info(f"Warning: {len(failed_items)} files failed processing. Retrying...")
+            items_to_process = failed_items
+            attempt += 1
+
+        return results
+    finally:
+        query.results = incoming_query_results
 
 def format_query(
     start_date: str | datetime,
@@ -215,5 +258,10 @@ def get_FRP_products(
     query = hda_client.search(json_query)
     
     results = download(query, archive_dir=get_storage_path(), rm_archive=False)
+    assert len(query.results) == len(results), (
+        "Mismatch between number of queried items and returned result paths: "
+        f"query.results={len(query.results)}, results={len(results)}"
+    )
+    print(f"Successfully downloaded and extracted {len(results)} FRP products.")
     return results
     
