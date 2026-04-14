@@ -3,7 +3,7 @@ output_dir = env.getdir("OUTPUT_DIR")
 dir_ancillary = env.getdir("DIR_ANCILLARY")
 
 if not dir_ancillary.exists():
-    raise FileNotFoundError(f"FRP download directory {dir_ancillary} does not exist. Please create it or check your environment configuration.")
+    raise FileNotFoundError(f"Ancillary directory {dir_ancillary} does not exist. Please create it or check your environment configuration.")
 
 frp_download_dir = dir_ancillary / "SLSTR_FRP"
 frp_download_dir.mkdir(parents=False, exist_ok=True)
@@ -16,7 +16,6 @@ failed_fpr_dir.mkdir(parents=False, exist_ok=True)
 
 log_event_dir = output_dir / "log_event"
 log_event_dir.mkdir(parents=False, exist_ok=True)
-
 
 gridded_log_event_dir = output_dir / "gridded_log_event"
 gridded_log_event_dir.mkdir(parents=False, exist_ok=True)
